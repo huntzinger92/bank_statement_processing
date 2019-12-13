@@ -1,3 +1,18 @@
+#right now, plotOptions is not showing. set up combobox structure and setCentralWidget to force showing, make sure plots are called correctly
+
+#refactor with pyqt5 graph
+#buttons become QGroupBox
+#only one graph shown at a time, buttons toggle which graph is shown (probably just build from scratch each time, inexpensive)
+#add "projected savings" feature
+# - uses average monthly income/expenditure to project savings into the future (possibly include slider for years, init amount from last bank account balance)
+# - displays those averages to user, possibly allow them to rewrite to see different projections?
+
+#STEP BY STEP
+#1. turn buttons into dropdown menu, create groupbox to handle them
+#2. create logic that will generate average monthly income/expenditures (SQL Query), display those values along with selected user id, put in groupbox
+#3. add a plot widget, rewrite each plot code with PyQt5_graph syntax and that, when function is called, stores that plot into the class variable that is being displayed
+#4. clean up style, organize code
+
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 import sys
@@ -7,6 +22,8 @@ import matplotlib.dates
 import re
 import operator
 import sqlite3
+from PyQt5.Qt import PYQT_VERSION_STR
+print("PyQt version: ", PYQT_VERSION_STR)
 
 from pandas.plotting import register_matplotlib_converters #date2num needs to be registered
 register_matplotlib_converters()
@@ -53,19 +70,30 @@ class Example(QMainWindow):
         already_imported = temp.fetchall()
         connection.close()
 
-        combo = QComboBox(self)
-        combo.addItem('--Select--')
+        userDropdown = QComboBox(self)
+        userDropdown.addItem('--Select--')
         #if len(already_imported) > 0:
         for user in already_imported:
-            combo.addItems(user)
+            userDropdown.addItems(user)
         #else:
-            #combo.addItems(('(none)',))
-        combo.activated[str].connect(self.onPreviousData)
-        combo.move(15, 65)
+            #userDropdown.addItems(('(none)',))
+        userDropdown.activated[str].connect(self.onPreviousData)
+        userDropdown.move(15, 65)
         qlabel = QLabel(self)
         qlabel.setText('Import a new bank statement from the menu bar or select previous data from menu below:')
         qlabel.move(15,35)
         qlabel.resize(len(qlabel.text()) * 6, 15)
+
+        #Plot options dropdown
+        self.plotOptions = QComboBox()
+        self.plotOptions.addItem('All Balances')
+        self.plotOptions.addItem('Monthly Balances')
+        self.plotOptions.addItem('Monthly Incomes vs. Expenditures')
+        self.plotOptions.addItem('Monthly Savings')
+        self.plotOptions.addItem('Monthly Income/Expenditures/Savings')
+        self.plotOptions.addItem('Income Sources by Year')
+        self.plotOptions.addItem('Yearly Gross')
+        self.plotOptions.activated[str].connect(self.handlePlotOptions)
 
         #BUTTONS
         showMonthlyBalances = QPushButton('Show Monthly Balances', self)
@@ -304,6 +332,22 @@ class Example(QMainWindow):
 
         connection.commit()
         connection.close()
+
+    def handlePlotOptions(self, choice):
+        if choice == 'All Balances':
+            self.displayBalancePlots()
+        elif choice == 'Monthly Balances':
+            self.displayBalancePlots()
+        elif choice == 'Monthly Incomes vs. Expenditures':
+            self.compareIncomesExpenditures()
+        elif choice == 'Monthly Savings':
+            self.displaySavings()
+        elif choice == 'Monthly Income/Expenditures/Savings':
+            self.displayBarMultiVar()
+        elif choice == 'Income Sources by Year':
+            self.displayIncomeSources()
+        elif choice == 'Yearly Gross':
+            self.displayYearlyGross()
 
     def displayBalancePlots(self):
         plt.figure(figsize = (len(self.months)/1.2, 3))
