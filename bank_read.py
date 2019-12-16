@@ -1,20 +1,21 @@
-#right now, plotOptions is not showing. set up combobox structure and setCentralWidget to force showing, make sure plots are called correctly
-
-#refactor with pyqt5 graph
-#buttons become QGroupBox
-#only one graph shown at a time, buttons toggle which graph is shown (probably just build from scratch each time, inexpensive)
-#add "projected savings" feature
-# - uses average monthly income/expenditure to project savings into the future (possibly include slider for years, init amount from last bank account balance)
-# - displays those averages to user, possibly allow them to rewrite to see different projections?
+#next step is creating a plot widget/rewriting matplotlib syntax to pyqt5_graph
 
 #STEP BY STEP
 #1. turn buttons into dropdown menu, create groupbox to handle them
 #2. create logic that will generate average monthly income/expenditures (SQL Query), display those values along with selected user id, put in groupbox
+#---> you are here (don't forget to break up all balances function into two)
 #3. add a plot widget, rewrite each plot code with PyQt5_graph syntax and that, when function is called, stores that plot into the class variable that is being displayed
-#4. clean up style, organize code
+#4. Calculate average monthly savings and project savings into the future, don't forget to include in database storage/queries, slider to adjust for time?
+#4b. extra credit for doing a linear regression on monthly income/expenditures and using a changing monthly savings for projections
+#5. clean up style, organize code
 
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
+from pyqtgraph import PlotWidget, plot
+import pyqtgraph as pg
+from PyQt5.Qt import PYQT_VERSION_STR
+print("PyQt version: ", PYQT_VERSION_STR)
+
 import sys
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -22,8 +23,6 @@ import matplotlib.dates
 import re
 import operator
 import sqlite3
-from PyQt5.Qt import PYQT_VERSION_STR
-print("PyQt version: ", PYQT_VERSION_STR)
 
 from pandas.plotting import register_matplotlib_converters #date2num needs to be registered
 register_matplotlib_converters()
@@ -63,26 +62,33 @@ class Example(QMainWindow):
 
         #combobox to select prior imported data:
 
-        #first, get ids associated with previous collections of data (each id is unique - used to track data in database)
+        #get ids associated with previous collections of data (each id is unique - used to track data in database)
         connection = sqlite3.connect('bank_statement_data.db')
         cursor = connection.cursor()
         temp = cursor.execute('select * from users')
         already_imported = temp.fetchall()
         connection.close()
 
-        userDropdown = QComboBox(self)
-        userDropdown.addItem('--Select--')
+        #previous data dropdown
+
+        self.userDropdown = QComboBox(self)
+        self.userDropdown.addItem('--Select--')
         #if len(already_imported) > 0:
         for user in already_imported:
-            userDropdown.addItems(user)
+            self.userDropdown.addItems(user)
         #else:
-            #userDropdown.addItems(('(none)',))
-        userDropdown.activated[str].connect(self.onPreviousData)
-        userDropdown.move(15, 65)
-        qlabel = QLabel(self)
-        qlabel.setText('Import a new bank statement from the menu bar or select previous data from menu below:')
-        qlabel.move(15,35)
-        qlabel.resize(len(qlabel.text()) * 6, 15)
+            #self.userDropdown.addItems(('(none)',))
+        self.userDropdown.activated[str].connect(self.onPreviousData)
+        self.userDropdown.move(15, 65)
+        self.userDropdownLabel = QLabel(self.userDropdown)
+        self.userDropdownLabel.setText('Previously imported data:')
+        #self.userDropdownLabel.move(15,35)
+        #self.userDropdownLabel.resize(len(qlabel.text()) * 6, 15)
+        self.userBox = QGroupBox()
+        userLayout = QVBoxLayout()
+        userLayout.addWidget(self.userDropdownLabel)
+        userLayout.addWidget(self.userDropdown)
+        self.userBox.setLayout(userLayout)
 
         #Plot options dropdown
         self.plotOptions = QComboBox()
@@ -94,40 +100,61 @@ class Example(QMainWindow):
         self.plotOptions.addItem('Income Sources by Year')
         self.plotOptions.addItem('Yearly Gross')
         self.plotOptions.activated[str].connect(self.handlePlotOptions)
+        self.plotOptionsLabel = QLabel(self.plotOptions)
+        self.plotOptionsLabel.setText('Graph Options:')
+        self.plotOptionsBox = QGroupBox()
+        plotOptionsLayout = QVBoxLayout()
+        plotOptionsLayout.addWidget(self.plotOptionsLabel)
+        plotOptionsLayout.addWidget(self.plotOptions)
+        self.plotOptionsBox.setLayout(plotOptionsLayout)
 
         #BUTTONS
-        showMonthlyBalances = QPushButton('Show Monthly Balances', self)
-        showMonthlyBalances.move(self.buttonLocation[0],self.buttonLocation[1])
-        showMonthlyBalances.resize(200,50)
-        showMonthlyBalances.clicked.connect(self.displayBalancePlots)
+        #showMonthlyBalances = QPushButton('Show Monthly Balances', self)
+        #showMonthlyBalances.move(self.buttonLocation[0],self.buttonLocation[1])
+        #showMonthlyBalances.resize(200,50)
+        #showMonthlyBalances.clicked.connect(self.displayBalancePlots)
 
-        showIncomesExpenditures = QPushButton('Incomes vs. Expenditures by Month', self)
-        showIncomesExpenditures.move(self.buttonLocation[0],self.buttonLocation[1] + 55)
-        showIncomesExpenditures.resize(200,50)
-        showIncomesExpenditures.clicked.connect(self.compareIncomesExpenditures)
+        #showIncomesExpenditures = QPushButton('Incomes vs. Expenditures by Month', self)
+        #showIncomesExpenditures.move(self.buttonLocation[0],self.buttonLocation[1] + 55)
+        #showIncomesExpenditures.resize(200,50)
+        #showIncomesExpenditures.clicked.connect(self.compareIncomesExpenditures)
 
-        showSavings = QPushButton('Savings by Month', self)
-        showSavings.move(self.buttonLocation[0], self.buttonLocation[1] + 110)
-        showSavings.resize(200,50)
-        showSavings.clicked.connect(self.displaySavings)
+        #showSavings = QPushButton('Savings by Month', self)
+        #showSavings.move(self.buttonLocation[0], self.buttonLocation[1] + 110)
+        #showSavings.resize(200,50)
+        #showSavings.clicked.connect(self.displaySavings)
 
-        showBarMulti = QPushButton('Income/Expenditures/Savings by Month', self)
-        showBarMulti.move(self.buttonLocation[0], self.buttonLocation[1] + 165)
-        showBarMulti.resize(200,50)
-        showBarMulti.clicked.connect(self.displayBarMultiVar)
+        #showBarMulti = QPushButton('Income/Expenditures/Savings by Month', self)
+        #showBarMulti.move(self.buttonLocation[0], self.buttonLocation[1] + 165)
+        #showBarMulti.resize(200,50)
+        #showBarMulti.clicked.connect(self.displayBarMultiVar)
 
-        showIncomeSources = QPushButton('Income Sorted by Source by Year', self)
-        showIncomeSources.move(self.buttonLocation[0], self.buttonLocation[1] + 220)
-        showIncomeSources.resize(200,50)
-        showIncomeSources.clicked.connect(self.displayIncomeSources)
+        #showIncomeSources = QPushButton('Income Sorted by Source by Year', self)
+        #showIncomeSources.move(self.buttonLocation[0], self.buttonLocation[1] + 220)
+        #showIncomeSources.resize(200,50)
+        #showIncomeSources.clicked.connect(self.displayIncomeSources)
 
-        showYearlyGross = QPushButton('Yearly Gross Income', self)
-        showYearlyGross.move(self.buttonLocation[0], self.buttonLocation[1] + 275)
-        showYearlyGross.resize(200,50)
-        showYearlyGross.clicked.connect(self.displayYearlyGross)
+        #showYearlyGross = QPushButton('Yearly Gross Income', self)
+        #showYearlyGross.move(self.buttonLocation[0], self.buttonLocation[1] + 275)
+        #showYearlyGross.resize(200,50)
+        #showYearlyGross.clicked.connect(self.displayYearlyGross)
 
-        self.setGeometry(150, 150, len(qlabel.text()) * 5 + 50, self.buttonLocation[1] + 350)
+        #setting overall layout
+        self.dropdownRow = QGroupBox()
+        dropdownLayout = QHBoxLayout()
+        dropdownLayout.addWidget(self.plotOptionsBox)
+        dropdownLayout.addWidget(self.userBox)
+        self.dropdownRow.setLayout(dropdownLayout)
+
+        self.container = QGroupBox()
+        containerLayout = QVBoxLayout()
+        containerLayout.addWidget(self.dropdownRow)
+        #containerLayout.addWidget(self.currentPlot) #add when you've refactored graph with pyqt5
+        self.container.setLayout(containerLayout)
+
+        #self.setGeometry(150, 150, len(qlabel.text()) * 5 + 50, self.buttonLocation[1] + 350)
         self.setWindowTitle('Graph Your Bank Statement')
+        self.setCentralWidget(self.container)
         self.show()
 
     def getFilePath(self):
