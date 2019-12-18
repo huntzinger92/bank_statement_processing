@@ -1,22 +1,22 @@
-#create a "normalLayout" function that initiates and resets layout if boolean is true, also create an altered layout that allows user to mess with savings calcuations
-#on display yearly income sources, make sure graph is initiated with first year
-#figure out how to go from The Unix epoch to monthly x ticks in all balances (??)
+#problems remaining:
+# - create an altered layout that allows user to mess with savings calcuations
+#   - altered layout - slider allowing for adjusting of years, display avg monthly saving and allow them to mess with it
+# - figure out how to go from The Unix epoch to monthly x ticks in all balances (??)
 
-#STEP BY STEP
-#1. turn buttons into dropdown menu, create groupbox to handle them
-#2. create logic that will generate average monthly income/expenditures (SQL Query), display those values along with selected user id, put in groupbox
-#---> you are here (don't forget to break up all balances function into two)
-#3. add a plot widget, rewrite each plot code with PyQt5_graph syntax and that, when function is called, stores that plot into the class variable that is being displayed
-#4. Calculate average monthly savings and project savings into the future, don't forget to include in database storage/queries, slider to adjust for time?
-#4b. extra credit for doing a linear regression on monthly income/expenditures and using a changing monthly savings for projections
-#5. clean up style, organize code
+# - linear regression on balance changes (how to get it to recognize time passed?)
+# - make sure any new data you've created is stored appropriately in database
+# - style better: length of toolbars, color not displaying on displayBarMultiVar legend, income vs. expenditure legend text doesn't look good
+# - delete database information before finalizing
 
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from pyqtgraph import PlotWidget, plot
 import pyqtgraph as pg
-from PyQt5.Qt import PYQT_VERSION_STR
-print("PyQt version: ", PYQT_VERSION_STR)
+pg.setConfigOption('background', 'w') #make graph white and black
+pg.setConfigOption('foreground', 'k')
+#from PyQt5.Qt import PYQT_VERSION_STR
+import PyQt5.Qt as Qt
+print("PyQt version: ", Qt.PYQT_VERSION_STR)
 
 import sys
 import pandas as pd
@@ -55,6 +55,8 @@ class Example(QMainWindow):
         self.year_x_ticks = [] #tuples of integer and respective gross income by year (just year as string)
         self.greenPen = pg.mkPen(color=(50, 130, 20), width=2) #used when graph is actually plotted
         self.redPen = pg.mkPen(color=(243, 59, 59), width=2)
+        self.bluePen = pg.mkPen(color=(57, 64, 255), width=2)
+        self.layout_is_normal = False
         self.initUI()
 
     def initUI(self):
@@ -110,27 +112,31 @@ class Example(QMainWindow):
 
         #currentPlot widget
         self.currentPlot = pg.PlotWidget()
-        self.currentPlot.setBackground('w')
         self.currentPlot.showGrid(x=True, y=True)
         self.xAxis = self.currentPlot.getAxis('bottom')
         self.yAxis = self.currentPlot.getAxis('top')
+        self.currentPlot.setLabel("left", "Amount ($)")
 
         #setting overall layout
-        self.dropdownRow = QGroupBox()
-        dropdownLayout = QHBoxLayout()
-        dropdownLayout.addWidget(self.plotOptionsBox)
-        dropdownLayout.addWidget(self.userBox)
-        self.dropdownRow.setLayout(dropdownLayout)
-
-        self.container = QGroupBox()
-        containerLayout = QVBoxLayout()
-        containerLayout.addWidget(self.dropdownRow)
-        containerLayout.addWidget(self.currentPlot)
-        self.container.setLayout(containerLayout)
+        self.setNormalLayout()
 
         self.setWindowTitle('Graph Your Bank Statement')
-        self.setCentralWidget(self.container)
         self.show()
+
+    def setNormalLayout(self):
+        if not self.layout_is_normal:
+            self.dropdownRow = QGroupBox()
+            dropdownLayout = QHBoxLayout()
+            dropdownLayout.addWidget(self.plotOptionsBox)
+            dropdownLayout.addWidget(self.userBox)
+            self.dropdownRow.setLayout(dropdownLayout)
+            self.container = QGroupBox()
+            containerLayout = QVBoxLayout()
+            containerLayout.addWidget(self.dropdownRow)
+            containerLayout.addWidget(self.currentPlot)
+            self.container.setLayout(containerLayout)
+            self.setCentralWidget(self.container)
+            self.layout_is_normal = True
 
     def getFilePath(self):
         filename = QFileDialog.getOpenFileName(self, 'Open File', '/home', "CSV files (*.csv)")
@@ -366,38 +372,41 @@ class Example(QMainWindow):
             return ''
 
     def displayAllBalances(self):
+        self.setNormalLayout()
         self.clearPlot()
-        self.currentPlot.plot([i[0] for i in self.all_balances], [i[1] for i in self.all_balances], pen=self.greenPen)
-        self.currentPlot.setTitle('All Account Balance Changes')
-        self.currentPlot.setLabel('left', 'Remaining Balance ($)')
+        self.currentPlot.plot([i[0] for i in self.all_balances], [i[1] for i in self.all_balances], pen=self.bluePen, symbol='o', symbolBrush=(57, 64, 255))
+        self.currentPlot.setTitle('Balance Remaining After Every Transaction')
 
     def displayMonthlyBalances(self):
+        self.setNormalLayout()
         self.clearPlot()
-        self.currentPlot.plot(self.x_axis_monthly, self.balances, pen=self.greenPen)
+        self.currentPlot.plot(self.x_axis_monthly, self.balances, pen=self.bluePen, symbol='o', symbolBrush=(57, 64, 255))
         self.currentPlot.setTitle('All Account Balance Changes Grouped by Month')
-        self.currentPlot.setLabel('left', 'Remaining Balance ($)')
         self.xAxis.setTicks([self.month_x_ticks])
 
     def compareIncomesExpenditures(self):
+        self.setNormalLayout()
         self.clearPlot()
         self.legend = self.currentPlot.addLegend()
-        self.currentPlot.plot(self.x_axis_monthly, self.incomes, name='Income', pen=self.greenPen)
-        self.currentPlot.plot(self.x_axis_monthly, self.expenditures, name='Expenditures', pen=self.redPen)
+        self.currentPlot.plot(self.x_axis_monthly, self.incomes, name='Income', pen=self.greenPen, symbol='o', symbolBrush=(50, 130, 20))
+        self.currentPlot.plot(self.x_axis_monthly, self.expenditures, name='Expenditures', pen=self.redPen, symbol='o', symbolBrush=(243, 59, 59))
         self.xAxis.setTicks([self.month_x_ticks])
         self.currentPlot.setTitle('Monthly Income vs. Expenditures')
-        self.currentPlot.setLabel('left', 'Amount ($)')
 
     def displaySavings(self):
+        self.setNormalLayout()
         self.clearPlot()
-        self.currentPlot.plot(self.x_axis_monthly, self.savings)
+        self.currentPlot.plot(self.x_axis_monthly, self.savings, pen=self.bluePen, symbol='o', symbolBrush=(57, 64, 255))
         self.currentPlot.setTitle('Monthly Savings')
         self.xAxis.setTicks([self.month_x_ticks])
 
     def displayBarMultiVar(self):
+        self.setNormalLayout()
+        self.clearPlot()
+
         x_left = list(map(lambda x: x -.25, self.x_axis_monthly))
         x_right = list(map(lambda x: x +.25, self.x_axis_monthly))
 
-        self.clearPlot()
         self.legend = self.currentPlot.addLegend()
         incomes_bar = pg.BarGraphItem(x=x_left, height=self.incomes, width=0.25, brush='g', name='Incomes')
         expenditures_bar = pg.BarGraphItem(x=self.x_axis_monthly, height=self.expenditures, width=0.25, brush='r', name='Expenditures')
@@ -410,12 +419,10 @@ class Example(QMainWindow):
         self.legend.addItem(expenditures_bar, "Expenditures")
         self.legend.addItem(savings_bar, "Savings")
         self.currentPlot.setTitle("Comparison of Monthly Income, Expenditures, and Savings")
-        self.currentPlot.setLabel("left", "Amount ($)")
-        print([self.month_x_ticks])
         self.xAxis.setTicks([self.month_x_ticks])
 
     def addYearDropdown(self):
-        self.layout_has_year_dropdown = True
+        self.layout_is_normal = False
         self.yearOptions = QComboBox()
         for year in self.income_source_hash:
             self.yearOptions.addItem(str(year))
@@ -442,26 +449,50 @@ class Example(QMainWindow):
         self.clearPlot()
         self.currentPlot.addItem(self.year_plot_hash[chosen_year][0])
         self.xAxis.setTicks([self.year_plot_hash[chosen_year][1]])
+        self.currentPlot.setTitle('Unique Income Sources from %s' % chosen_year)
 
     def displayIncomeSources(self):
         self.addYearDropdown()
+
+        #init_year used to create an initial graph before user choice, intuitive behavior from UI (as user already chose income source category before choosing a year)
+        init_year = ''
         for year in self.income_source_hash:
+            if not init_year:
+                init_year = year
             sorted_income_tuples = sorted(self.income_source_hash[year].items(), key=operator.itemgetter(1), reverse=True)
             #each key in year_plot_hash is a year as string, value is a tuple where first entry is a BarGraphItem, 2nd entry is a sub-tuple that contains formatted x-tick labels: [(integer1, description1), (integer2, description2)...]
             self.year_plot_hash[str(year)] = (pg.BarGraphItem(x=[i for i in range(0, len(sorted_income_tuples))], height=[item[1] for item in sorted_income_tuples], width=.25, brush='g'), [(i, sorted_income_tuples[i][0]) for i in range(0, len(sorted_income_tuples))])
 
+        self.handleDisplayYear(init_year)
+
     def displayYearlyGross(self):
+        self.setNormalLayout()
         self.clearPlot()
-        self.currentPlot.plot(range(0, len(self.yearly_gross)), self.yearly_gross)
+        self.currentPlot.plot(range(0, len(self.yearly_gross)), self.yearly_gross, pen=self.greenPen, symbol='o', symbolBrush=(50, 130, 20))
         self.xAxis.setTicks([self.year_x_ticks])
+        self.currentPlot.setTitle('Yearly Gross Income')
 
     def displaySavingsProjections(self):
         if self.all_balances:
             init_amount = self.all_balances[1][-1] #last known amount in account
             avg_yearly_savings = self.avgSavings * 12
             years_projected = 20 #note: make this a slider user can manually alter, eventually (display on function call)
+
+            #add x ticks, should start on current year, each x tick adds one to year label
+            latest_year = max(map(lambda year: int(year), self.income_source_hash.keys()))
+            #projection data is a list of tuples where (x coordinate, x description), where x description is the year projected
+            projection_x_ticks = []
+            projection_savings = []
+            for i in range(0, years_projected):
+                projection_x_ticks.append((i, str(latest_year + i)))
+                projection_savings.append(init_amount + (avg_yearly_savings * i))
+
+            #self.makeRelevantLayout()
+            #what should relevant layout look like?
             self.clearPlot()
-            self.currentPlot.plot([i for i in range(0, years_projected + 1)], [init_amount + (avg_yearly_savings * i) for i in range(0, years_projected + 1)])
+            self.currentPlot.plot([item[0] for item in projection_x_ticks], projection_savings, pen=self.bluePen, symbol='o', symbolBrush=(57, 64, 255))
+            self.currentPlot.setTitle('Projected Savings for %s Years' % years_projected)
+            self.xAxis.setTicks([projection_x_ticks])
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
