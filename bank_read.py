@@ -1,6 +1,4 @@
 #problems remaining:
-# - make import more obviously a button (change to 'import new statement'), prohibit graph zooming?, maximize gui on open?, hide graph options until data is imported,
-# - style savings display, bar graph legend not displaying colors
 # - give final onceover on code organization, clarifying comments
 
 # - delete database information before finalizing
@@ -63,7 +61,7 @@ class Example(QMainWindow):
         openFile.setStatusTip('Open new File')
         openFile.triggered.connect(self.getFilePath)
         menubar = self.menuBar()
-        fileMenu = menubar.addMenu('&Import')
+        fileMenu = menubar.addMenu('&Import New Statement')
         fileMenu.addAction(openFile)
 
         #get ids associated with previous collections of data (each id is unique - used to track data in database)
@@ -106,6 +104,7 @@ class Example(QMainWindow):
         plotOptionsLayout.addWidget(self.plotOptionsLabel)
         plotOptionsLayout.addWidget(self.plotOptions)
         self.plotOptionsBox.setLayout(plotOptionsLayout)
+        self.plotOptionsBox.hide()
 
         #currentPlot widget
         self.currentPlot = pg.PlotWidget()
@@ -118,14 +117,14 @@ class Example(QMainWindow):
         self.setNormalLayout()
 
         self.setWindowTitle('Graph Your Bank Statement')
-        self.show()
+        self.showMaximized()
 
     def setNormalLayout(self):
         if not self.layout_is_normal:
             self.dropdownRow = QGroupBox()
             dropdownLayout = QHBoxLayout()
-            dropdownLayout.addWidget(self.plotOptionsBox)
             dropdownLayout.addWidget(self.userBox)
+            dropdownLayout.addWidget(self.plotOptionsBox)
             self.dropdownRow.setLayout(dropdownLayout)
             self.container = QGroupBox()
             containerLayout = QVBoxLayout()
@@ -151,6 +150,7 @@ class Example(QMainWindow):
 
     def onPreviousData(self, text):
         #following code uses user-selected id to import all data necessary for graphing from database, then creates the necssary data for graphing from SQL queries
+        self.plotOptionsBox.show()
         if text == '--Select--':
             return
 
@@ -223,6 +223,7 @@ class Example(QMainWindow):
 
     def crunchAndSend(self):
         #crunches data, creates id-specific tables in db, and sends data to said tables
+        self.plotOptionsBox.show()
 
         source_matcher = re.compile("(?<=Deposit ).*$") #matches all text from "Deposit " to end of line (name of entity depositing)
         atm_catcher = re.compile('^at ATM #[0-9]*$') #different atms have different number ids, this allows us to lump them all together as one source
@@ -275,7 +276,8 @@ class Example(QMainWindow):
         self.yearly_gross.reverse()
 
         self.year_x_ticks = []
-        for index, year in enumerate(sorted(list(self.income_source_hash.keys()))):
+        sorted_years = sorted(list(self.income_source_hash.keys()))
+        for index, year in enumerate(sorted_years):
             self.year_x_ticks.append((index, year))
 
         #reversing each list so graphs start with oldest month first
@@ -424,17 +426,17 @@ class Example(QMainWindow):
         x_left = list(map(lambda x: x -.25, self.x_axis_monthly))
         x_right = list(map(lambda x: x +.25, self.x_axis_monthly))
 
-        self.legend = self.currentPlot.addLegend()
+        self.legend = self.currentPlot.addLegend(offset=(-1200,-572))
         incomes_bar = pg.BarGraphItem(x=x_left, height=self.incomes, width=0.25, brush='g', name='Incomes')
         expenditures_bar = pg.BarGraphItem(x=self.x_axis_monthly, height=self.expenditures, width=0.25, brush='r', name='Expenditures')
         savings_bar = pg.BarGraphItem(x=x_right, height=self.savings, width=0.25, brush='b', name='Savings')
         self.currentPlot.addItem(incomes_bar)
         self.currentPlot.addItem(expenditures_bar)
         self.currentPlot.addItem(savings_bar)
-        #color currently not displaying with legend. Note that addItem is also NOT using the name keyword defined within incomes_bar et al.
-        self.legend.addItem(incomes_bar, "Incomes")
-        self.legend.addItem(expenditures_bar, "Expenditures")
-        self.legend.addItem(savings_bar, "Savings")
+        #color of BarGraphItem currently not displaying with legend. Note that addItem is also NOT using the name keyword defined within incomes_bar, etc.
+        self.legend.addItem(incomes_bar, name="Green: Incomes")
+        self.legend.addItem(expenditures_bar, name="Red: Expenditures")
+        self.legend.addItem(savings_bar, name="Blue: Savings")
         self.currentPlot.setTitle("Comparison of Monthly Income, Expenditures, and Savings")
         self.xAxis.setTicks([self.month_x_ticks])
 
@@ -459,7 +461,7 @@ class Example(QMainWindow):
         newContainerLayout.addWidget(self.currentPlot)
         self.newContainer.setLayout(newContainerLayout)
         self.setCentralWidget(self.newContainer)
-        self.show()
+        self.showMaximized()
 
         self.layout_is_normal = False
         self.has_savings_layout = False
@@ -492,12 +494,23 @@ class Example(QMainWindow):
         self.currentPlot.setTitle('Yearly Gross Income')
 
     def handleSavingsLayout(self):
+        styleSheet = ("border: 1px solid grey; font-size: 13px; font-weight: 450;")
+
+        average_display = QGroupBox()
+        average_layout = QVBoxLayout()
         avg_income_display = QLabel(self)
         avg_income_display.setText('Average Monthly Income: %s' % self.avgIncome)
+        avg_income_display.setStyleSheet(styleSheet)
         avg_expenditure_display = QLabel(self)
         avg_expenditure_display.setText('Average Monthly Expenditure: %s' % self.avgExpenditure)
+        avg_expenditure_display.setStyleSheet(styleSheet)
         avg_savings_display = QLabel(self)
         avg_savings_display.setText('Average Monthly Savings: %s' % self.avgSavings)
+        avg_savings_display.setStyleSheet(styleSheet)
+        average_layout.addWidget(avg_income_display)
+        average_layout.addWidget(avg_expenditure_display)
+        average_layout.addWidget(avg_savings_display)
+        average_display.setLayout(average_layout)
         years_slider = QSlider(Qt.Horizontal, self)
         years_slider.setMaximum(75)
         years_slider.setMinimum(5)
@@ -505,11 +518,10 @@ class Example(QMainWindow):
         years_slider.valueChanged[int].connect(self.changeYears)
         self.years_label = QLabel(years_slider)
         self.years_label.setText('Years Projected: 5')
+        self.years_label.setStyleSheet('font-size: 12px;')
         savings_container = QGroupBox()
         savings_layout = QHBoxLayout()
-        savings_layout.addWidget(avg_income_display)
-        savings_layout.addWidget(avg_expenditure_display)
-        savings_layout.addWidget(avg_savings_display)
+        savings_layout.addWidget(average_display)
         savings_layout.addWidget(self.years_label)
         savings_layout.addWidget(years_slider)
         savings_container.setLayout(savings_layout)
