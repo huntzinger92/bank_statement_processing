@@ -1,34 +1,27 @@
 #problems remaining:
-# - create an altered layout that allows user to mess with savings calcuations
-#   - altered layout - slider allowing for adjusting of years, display avg monthly saving and allow them to mess with it
-# - figure out how to go from The Unix epoch to monthly x ticks in all balances (??)
+# - make import more obviously a button (change to 'import new statement'), prohibit graph zooming?, maximize gui on open?, hide graph options until data is imported,
+# - style savings display, bar graph legend not displaying colors
+# - give final onceover on code organization, clarifying comments
 
-# - linear regression on balance changes (how to get it to recognize time passed?)
-# - make sure any new data you've created is stored appropriately in database
-# - style better: length of toolbars, color not displaying on displayBarMultiVar legend, income vs. expenditure legend text doesn't look good
 # - delete database information before finalizing
 
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
+from PyQt5.QtCore import Qt
 from pyqtgraph import PlotWidget, plot
 import pyqtgraph as pg
 pg.setConfigOption('background', 'w') #make graph white and black
 pg.setConfigOption('foreground', 'k')
-#from PyQt5.Qt import PYQT_VERSION_STR
-import PyQt5.Qt as Qt
-print("PyQt version: ", Qt.PYQT_VERSION_STR)
+from PyQt5.Qt import PYQT_VERSION_STR
+print("PyQt version: ", PYQT_VERSION_STR)
 
 import sys
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates
 import re
 import operator
 import sqlite3
+import datetime
 from statistics import mean
-
-from pandas.plotting import register_matplotlib_converters #date2num needs to be registered
-register_matplotlib_converters()
 
 class Example(QMainWindow):
 
@@ -39,13 +32,16 @@ class Example(QMainWindow):
         self.threshold = '' #used to remove credits/debits LARGER than this amount
         self.df = '' #holds dataframe of all bank transactions
         self.month_hash = {} #each month is a "sub-hash", containing key/value pairs for total expenditures, income, and balance
-        self.all_balances = [] #list of tuples containing integer representing date (date2num) and balance after every transaction
+        self.all_balances = [] #list of tuples containing integer representing date (unix epoch sec) and balance after every transaction
         self.months = [] #months as strings (used primarily for x-axis labels for graphing)
         self.incomes = [] #float amounts for income by month
         self.expenditures = [] #same for expenditures
         self.balances = [] #same but for last balance of month
         self.savings = [] #same but for savings
         self.avgSavings = 0 #a single number indicating average monthly savings over all months
+        self.avgIncome = 0 #same but with average monthly income
+        self.avgExpenditure = 0 #same but with expenditure
+        self.years_projected = 5 #used for the projected savings view, altered by self.changeYears
         self.x_axis_monthly = [] #list of integers in range(0, len(self.months))
         self.income_source_hash = {} #each key is a year with value of a "sub-hash" where each key is an income source and value is amount of income for that year
         self.year_plot_hash = {} #each key is a year where its value is the relevant plotwidget, displaying a bar graph of sorted sources of income
@@ -56,7 +52,8 @@ class Example(QMainWindow):
         self.greenPen = pg.mkPen(color=(50, 130, 20), width=2) #used when graph is actually plotted
         self.redPen = pg.mkPen(color=(243, 59, 59), width=2)
         self.bluePen = pg.mkPen(color=(57, 64, 255), width=2)
-        self.layout_is_normal = False
+        self.layout_is_normal = False #used to check and see when normal layout needs to be restored
+        self.has_savings_layout = False #used to check if savings layout is needed
         self.initUI()
 
     def initUI(self):
@@ -137,6 +134,7 @@ class Example(QMainWindow):
             self.container.setLayout(containerLayout)
             self.setCentralWidget(self.container)
             self.layout_is_normal = True
+            self.has_savings_layout = False
 
     def getFilePath(self):
         filename = QFileDialog.getOpenFileName(self, 'Open File', '/home', "CSV files (*.csv)")
@@ -177,7 +175,9 @@ class Example(QMainWindow):
             self.balances[i] = self.balances[i][0]
 
         self.savings = list(map(lambda income, expense: income - expense, self.incomes, self.expenditures))
-        self.avgSavings = mean(self.savings)
+        self.avgSavings = int(mean(self.savings) * 100)/100
+        self.avgIncome = int(mean(self.incomes) * 100)/100
+        self.avgExpenditure = int(mean(self.expenditures) * 100)/100
         self.month_x_ticks = [(self.x_axis_monthly[i], self.months[i]) for i in range(0, len(self.months))] #formatted for monthly x ticks on graphs
 
         years = cursor.execute('''SELECT DISTINCT year FROM %s_income_sources ORDER BY date(year)''' % self.key).fetchall()
@@ -228,8 +228,8 @@ class Example(QMainWindow):
         atm_catcher = re.compile('^at ATM #[0-9]*$') #different atms have different number ids, this allows us to lump them all together as one source
 
         for item in self.df.iterrows():
-            #a list of tuples with transaction timestamp (float) and account balance
-            self.all_balances.append((matplotlib.dates.date2num(item[1].get('Date')), item[1].get('Balance')))
+            #a list of tuples with transaction timestamp (unix epoch sec) and account balance
+            self.all_balances.append((pd.to_timedelta(item[1].get('Date') - pd.to_datetime('1/1/1970')).total_seconds(), item[1].get('Balance')))
             #the following code creates a hash where the year-month (string) is the key, and the value is a hash of incomes/expenditures/last balance
             date = item[1].get('year_month')
             if date not in self.month_hash:
@@ -268,19 +268,24 @@ class Example(QMainWindow):
 
         for year in self.income_source_hash:
             count = 0
-            self.year_x_ticks.append((len_self.year_x_ticks, year))
+            #self.year_x_ticks.append((len(self.year_x_ticks), year))
             for name in self.income_source_hash[year]:
                 count += self.income_source_hash[year][name]
             self.yearly_gross.append(count)
         self.yearly_gross.reverse()
-        self.year_x_ticks.reverse()
+
+        self.year_x_ticks = []
+        for index, year in enumerate(sorted(list(self.income_source_hash.keys()))):
+            self.year_x_ticks.append((index, year))
 
         #reversing each list so graphs start with oldest month first
         self.months.reverse()
         self.incomes.reverse()
         self.expenditures.reverse()
         self.savings = list(map(lambda income, expense: income - expense, self.incomes, self.expenditures))
-        self.avgSavings = mean(self.savings) #note, you still need to put this in the database
+        self.avgSavings = int(mean(self.savings) * 100)/100 #note: these three avgs are not entered into database, they are simply crunched on query if re-importing older data
+        self.avgIncome = int(mean(self.incomes) * 100)/100
+        self.avgExpenditure = int(mean(self.expenditures) * 100)/100
         self.balances.reverse()
         self.all_balances.reverse()
         self.x_axis_monthly = range(0, len(self.months)) #used for creating plots of proper length
@@ -371,11 +376,23 @@ class Example(QMainWindow):
         except Exception as e:
             return ''
 
+    def list_breakup(self, list_):
+        #this code breaks up the list with an interval that won't allow more than 12 or so x ticks, then formats the tick labels at that interval (month-year)
+        #note that this code assumes a list of unix epoch seconds and will not necessarily set ticks at n amount of months, but instead n amount of changes to balance
+        formatted_x_ticks = [(list_[0], datetime.datetime.utcfromtimestamp(list_[0]).strftime('%m-%Y'))]
+        length = len(list_)
+        interval = length//8
+        for index in range(interval, length, interval):
+            formatted_x_ticks.append((list_[index], datetime.datetime.utcfromtimestamp(list_[index]).strftime('%m-%Y')))
+        return formatted_x_ticks
+
     def displayAllBalances(self):
+        all_balances_x_ticks = self.list_breakup([i[0] for i in self.all_balances])
         self.setNormalLayout()
         self.clearPlot()
         self.currentPlot.plot([i[0] for i in self.all_balances], [i[1] for i in self.all_balances], pen=self.bluePen, symbol='o', symbolBrush=(57, 64, 255))
         self.currentPlot.setTitle('Balance Remaining After Every Transaction')
+        self.xAxis.setTicks([all_balances_x_ticks])
 
     def displayMonthlyBalances(self):
         self.setNormalLayout()
@@ -422,7 +439,6 @@ class Example(QMainWindow):
         self.xAxis.setTicks([self.month_x_ticks])
 
     def addYearDropdown(self):
-        self.layout_is_normal = False
         self.yearOptions = QComboBox()
         for year in self.income_source_hash:
             self.yearOptions.addItem(str(year))
@@ -444,6 +460,9 @@ class Example(QMainWindow):
         self.newContainer.setLayout(newContainerLayout)
         self.setCentralWidget(self.newContainer)
         self.show()
+
+        self.layout_is_normal = False
+        self.has_savings_layout = False
 
     def handleDisplayYear(self, chosen_year):
         self.clearPlot()
@@ -472,26 +491,68 @@ class Example(QMainWindow):
         self.xAxis.setTicks([self.year_x_ticks])
         self.currentPlot.setTitle('Yearly Gross Income')
 
+    def handleSavingsLayout(self):
+        avg_income_display = QLabel(self)
+        avg_income_display.setText('Average Monthly Income: %s' % self.avgIncome)
+        avg_expenditure_display = QLabel(self)
+        avg_expenditure_display.setText('Average Monthly Expenditure: %s' % self.avgExpenditure)
+        avg_savings_display = QLabel(self)
+        avg_savings_display.setText('Average Monthly Savings: %s' % self.avgSavings)
+        years_slider = QSlider(Qt.Horizontal, self)
+        years_slider.setMaximum(75)
+        years_slider.setMinimum(5)
+        years_slider.setSingleStep(1)
+        years_slider.valueChanged[int].connect(self.changeYears)
+        self.years_label = QLabel(years_slider)
+        self.years_label.setText('Years Projected: 5')
+        savings_container = QGroupBox()
+        savings_layout = QHBoxLayout()
+        savings_layout.addWidget(avg_income_display)
+        savings_layout.addWidget(avg_expenditure_display)
+        savings_layout.addWidget(avg_savings_display)
+        savings_layout.addWidget(self.years_label)
+        savings_layout.addWidget(years_slider)
+        savings_container.setLayout(savings_layout)
+
+        newest_container = QGroupBox()
+        layout = QVBoxLayout()
+        layout.addWidget(self.dropdownRow)
+        layout.addWidget(savings_container)
+        layout.addWidget(self.currentPlot)
+        newest_container.setLayout(layout)
+        self.setCentralWidget(newest_container)
+        self.layout_is_normal = False
+        self.has_savings_layout = True
+
+    def changeYears(self, year):
+        self.years_label.setText('Years Projected: %s' % year)
+        self.years_projected = year
+        self.displaySavingsProjections()
+
     def displaySavingsProjections(self):
         if self.all_balances:
+            #create new layout
+            if not self.has_savings_layout:
+                self.handleSavingsLayout()
+
             init_amount = self.all_balances[1][-1] #last known amount in account
             avg_yearly_savings = self.avgSavings * 12
-            years_projected = 20 #note: make this a slider user can manually alter, eventually (display on function call)
 
             #add x ticks, should start on current year, each x tick adds one to year label
             latest_year = max(map(lambda year: int(year), self.income_source_hash.keys()))
             #projection data is a list of tuples where (x coordinate, x description), where x description is the year projected
             projection_x_ticks = []
             projection_savings = []
-            for i in range(0, years_projected):
+            year_interval = 1
+            if self.years_projected > 45:
+                year_interval = 2
+            for i in range(0, self.years_projected, year_interval):
                 projection_x_ticks.append((i, str(latest_year + i)))
                 projection_savings.append(init_amount + (avg_yearly_savings * i))
 
-            #self.makeRelevantLayout()
-            #what should relevant layout look like?
             self.clearPlot()
             self.currentPlot.plot([item[0] for item in projection_x_ticks], projection_savings, pen=self.bluePen, symbol='o', symbolBrush=(57, 64, 255))
-            self.currentPlot.setTitle('Projected Savings for %s Years' % years_projected)
+            self.currentPlot.setTitle('Projected Savings for %s Years' % self.years_projected)
             self.xAxis.setTicks([projection_x_ticks])
 
 if __name__ == '__main__':
