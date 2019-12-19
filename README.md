@@ -1,7 +1,7 @@
 # bank_statement_processing
 
 Coded in Python 3.7
-Pandas 0.25, Matplotlib 1.3, and PyQt5 5.13.2 dependencies
+Pandas 0.25 and PyQt5 5.13.2 dependencies
 
 This program was designed to work with the formatting Mazuma Credit Union bank statements, exported as .csv files. It plots bank account balance changes, monthly income, expenditures, and savings, as well as plotted sorted income by source by year as a bar graph.
 
