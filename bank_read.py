@@ -1,14 +1,9 @@
-#problems remaining:
-# - give final onceover on code organization, clarifying comments
-
-# - delete database information before finalizing
-
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import Qt
 from pyqtgraph import PlotWidget, plot
 import pyqtgraph as pg
-pg.setConfigOption('background', 'w') #make graph white and black
+pg.setConfigOption('background', 'w') #make graphs white and black
 pg.setConfigOption('foreground', 'k')
 from PyQt5.Qt import PYQT_VERSION_STR
 print("PyQt version: ", PYQT_VERSION_STR)
@@ -25,8 +20,8 @@ class Example(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        #list of class variables to be used
         self.key = '' #defined by user input, from prompt after selecting the .csv file, used as primary key for all relevant data in db
-        self.buttonLocation = (135, 110) #initial button location, allows for easier movement of all buttons to accomodate UI changes
         self.threshold = '' #used to remove credits/debits LARGER than this amount
         self.df = '' #holds dataframe of all bank transactions
         self.month_hash = {} #each month is a "sub-hash", containing key/value pairs for total expenditures, income, and balance
@@ -71,7 +66,7 @@ class Example(QMainWindow):
         already_imported = temp.fetchall()
         connection.close()
 
-        #previous data dropdown
+        #previous data import dropdown
         self.userDropdown = QComboBox(self)
         self.userDropdown.addItem('--Select--')
         for user in already_imported:
@@ -86,7 +81,7 @@ class Example(QMainWindow):
         userLayout.addWidget(self.userDropdown)
         self.userBox.setLayout(userLayout)
 
-        #Plot options dropdown
+        #Plot options dropdown (hidden before data import, so user can't try to make plots with no data present)
         self.plotOptions = QComboBox()
         self.plotOptions.addItem('All Balances')
         self.plotOptions.addItem('Monthly Balances')
@@ -106,7 +101,7 @@ class Example(QMainWindow):
         self.plotOptionsBox.setLayout(plotOptionsLayout)
         self.plotOptionsBox.hide()
 
-        #currentPlot widget
+        #currentPlot widget, each plotOptions choice rewrites self.currentPlot with relevant data
         self.currentPlot = pg.PlotWidget()
         self.currentPlot.showGrid(x=True, y=True)
         self.xAxis = self.currentPlot.getAxis('bottom')
@@ -115,7 +110,6 @@ class Example(QMainWindow):
 
         #setting overall layout
         self.setNormalLayout()
-
         self.setWindowTitle('Graph Your Bank Statement')
         self.showMaximized()
 
@@ -135,22 +129,10 @@ class Example(QMainWindow):
             self.layout_is_normal = True
             self.has_savings_layout = False
 
-    def getFilePath(self):
-        filename = QFileDialog.getOpenFileName(self, 'Open File', '/home', "CSV files (*.csv)")
-
-        if filename != ('', ''):
-            #filename[0] is path for bank statement csv
-            self.df = pd.read_csv(filename[0], header=3, sep=',', error_bad_lines=False)
-            self.df['Date'] = pd.to_datetime(self.df.Date)
-            self.df = self.df.fillna(0)
-            self.df['year_month'] = self.df['Date'].dt.strftime("%Y" + "-" + "%m")
-            self.df.sort_values(by=['Date'])
-            #ask for id and threshold input
-            self.getPrompts()
-
     def onPreviousData(self, text):
         #following code uses user-selected id to import all data necessary for graphing from database, then creates the necssary data for graphing from SQL queries
         self.plotOptionsBox.show()
+
         if text == '--Select--':
             return
 
@@ -166,7 +148,7 @@ class Example(QMainWindow):
         self.incomes = cursor.execute('''SELECT income from %s_monthly ORDER BY date(month)''' % self.key).fetchall()
         self.expenditures = cursor.execute('''SELECT expenditures from %s_monthly ORDER BY date(month)''' % self.key).fetchall()
 
-        #extract value from returned tuple of sql queries
+        #extract value from returned tuple of sql queries (just need list of values, not list of tuples)
         for i in range(0, len(self.months)):
             #remove the artificially added day to each year-month (a contrivance necessary for sql sorting when in db)
             self.months[i] = self.months[i][0][:-3]
@@ -178,12 +160,12 @@ class Example(QMainWindow):
         self.avgSavings = int(mean(self.savings) * 100)/100
         self.avgIncome = int(mean(self.incomes) * 100)/100
         self.avgExpenditure = int(mean(self.expenditures) * 100)/100
-        self.month_x_ticks = [(self.x_axis_monthly[i], self.months[i]) for i in range(0, len(self.months))] #formatted for monthly x ticks on graphs
+        self.month_x_ticks = [(self.x_axis_monthly[i], self.months[i]) for i in range(0, len(self.months))] #formatted to create monthly x ticks on graphs
 
         years = cursor.execute('''SELECT DISTINCT year FROM %s_income_sources ORDER BY date(year)''' % self.key).fetchall()
         income_sources = cursor.execute('''SELECT * from %s_income_sources''' % self.key).fetchall()
 
-        #create income_source_hash
+        #create self.income_source_hash
         for year in years:
             self.year_x_ticks.append((len(self.year_x_ticks), year[0]))
             self.income_source_hash[year[0]] = {}
@@ -198,8 +180,21 @@ class Example(QMainWindow):
 
         connection.close()
 
+    def getFilePath(self):
+        #runs when user selects "Import New Statement" from menubar
+        filename = QFileDialog.getOpenFileName(self, 'Open File', '/home', "CSV files (*.csv)")
+        if filename != ('', ''):
+            #filename[0] is path for bank statement csv
+            self.df = pd.read_csv(filename[0], header=3, sep=',', error_bad_lines=False)
+            self.df['Date'] = pd.to_datetime(self.df.Date)
+            self.df = self.df.fillna(0)
+            self.df['year_month'] = self.df['Date'].dt.strftime("%Y" + "-" + "%m")
+            self.df.sort_values(by=['Date'])
+            #ask for id and threshold input
+            self.getPrompts()
+
     def getPrompts(self):
-        #users set id which is used as a unique value to group/track data in db
+        #user chooses an id, which is used as a unique value to store and track data in db
         tempTextHold, okPressed = QInputDialog.getText(self, "Text Input Dialog", "Please provide a name with which you would like to track this statement's data:")
         if okPressed:
             self.key = tempTextHold
@@ -209,7 +204,7 @@ class Example(QMainWindow):
             cursor.execute('''insert into users values(?)''', (self.key,))
             connection.commit()
             connection.close()
-        #users sets threshold (all transactions with a value equal to or greater threshold will be removed from processing)
+        #user sets transaction threshold (all transactions with a value equal to or greater threshold will be removed from processing)
         self.threshold, okPressed = QInputDialog.getInt(self, "Get integer","Would you like to remove all transactions above a certain dollar threshold? (enter -1 for none):", -1, -1, 1000000, 1)
         if okPressed:
             if self.threshold != -1:
@@ -222,15 +217,16 @@ class Example(QMainWindow):
             self.crunchAndSend()
 
     def crunchAndSend(self):
-        #crunches data, creates id-specific tables in db, and sends data to said tables
+        #crunches data, creates id-specific tables in db, and sends data to respective tables
         self.plotOptionsBox.show()
 
         source_matcher = re.compile("(?<=Deposit ).*$") #matches all text from "Deposit " to end of line (name of entity depositing)
         atm_catcher = re.compile('^at ATM #[0-9]*$') #different atms have different number ids, this allows us to lump them all together as one source
 
         for item in self.df.iterrows():
-            #a list of tuples with transaction timestamp (unix epoch sec) and account balance
+            #generate a list of tuples with transaction timestamp (unix epoch sec) and remaining account balance for every transaction
             self.all_balances.append((pd.to_timedelta(item[1].get('Date') - pd.to_datetime('1/1/1970')).total_seconds(), item[1].get('Balance')))
+
             #the following code creates a hash where the year-month (string) is the key, and the value is a hash of incomes/expenditures/last balance
             date = item[1].get('year_month')
             if date not in self.month_hash:
@@ -259,7 +255,7 @@ class Example(QMainWindow):
                     self.income_source_hash[year] = {description: amount}
 
         #following code extracts data from month_hash into separate lists for each attribute (income, expenditures, etc.)
-        #although it doesn't generate new data, this allows for more concise code later
+        #although it doesn't generate new data, this allows for more concise and legible code later
         self.months = list(self.month_hash.keys())
 
         for month in self.months:
@@ -269,7 +265,6 @@ class Example(QMainWindow):
 
         for year in self.income_source_hash:
             count = 0
-            #self.year_x_ticks.append((len(self.year_x_ticks), year))
             for name in self.income_source_hash[year]:
                 count += self.income_source_hash[year][name]
             self.yearly_gross.append(count)
@@ -372,6 +367,7 @@ class Example(QMainWindow):
             self.displaySavingsProjections()
 
     def clearPlot(self):
+        #called every time a new graph is chosen
         self.currentPlot.clear()
         try: #removes the legend, which .clear() will not do
             self.legend.scene().removeItem(self.legend)
@@ -379,7 +375,7 @@ class Example(QMainWindow):
             return ''
 
     def list_breakup(self, list_):
-        #this code breaks up the list with an interval that won't allow more than 12 or so x ticks, then formats the tick labels at that interval (month-year)
+        #this code breaks up list_ with an interval that won't allow more than 12 x ticks, then formats the tick labels at that interval (month-year)
         #note that this code assumes a list of unix epoch seconds and will not necessarily set ticks at n amount of months, but instead n amount of changes to balance
         formatted_x_ticks = [(list_[0], datetime.datetime.utcfromtimestamp(list_[0]).strftime('%m-%Y'))]
         length = len(list_)
@@ -441,6 +437,7 @@ class Example(QMainWindow):
         self.xAxis.setTicks([self.month_x_ticks])
 
     def addYearDropdown(self):
+        #called when self.displayIncomeSources, as there is a distinct graph for each year in statement history
         self.yearOptions = QComboBox()
         for year in self.income_source_hash:
             self.yearOptions.addItem(str(year))
@@ -473,10 +470,12 @@ class Example(QMainWindow):
         self.currentPlot.setTitle('Unique Income Sources from %s' % chosen_year)
 
     def displayIncomeSources(self):
+        #this creates a hash of plots where the keys are each year and their values are the relevant plot. User chooses which year to display
         self.addYearDropdown()
 
         #init_year used to create an initial graph before user choice, intuitive behavior from UI (as user already chose income source category before choosing a year)
         init_year = ''
+
         for year in self.income_source_hash:
             if not init_year:
                 init_year = year
@@ -484,6 +483,7 @@ class Example(QMainWindow):
             #each key in year_plot_hash is a year as string, value is a tuple where first entry is a BarGraphItem, 2nd entry is a sub-tuple that contains formatted x-tick labels: [(integer1, description1), (integer2, description2)...]
             self.year_plot_hash[str(year)] = (pg.BarGraphItem(x=[i for i in range(0, len(sorted_income_tuples))], height=[item[1] for item in sorted_income_tuples], width=.25, brush='g'), [(i, sorted_income_tuples[i][0]) for i in range(0, len(sorted_income_tuples))])
 
+        #initialize graph with first year in statement
         self.handleDisplayYear(init_year)
 
     def displayYearlyGross(self):
@@ -494,6 +494,7 @@ class Example(QMainWindow):
         self.currentPlot.setTitle('Yearly Gross Income')
 
     def handleSavingsLayout(self):
+        #builds new layout for savings projection view
         styleSheet = ("border: 1px solid grey; font-size: 13px; font-weight: 450;")
 
         average_display = QGroupBox()
@@ -537,6 +538,7 @@ class Example(QMainWindow):
         self.has_savings_layout = True
 
     def changeYears(self, year):
+        #called when slider from savings view is adjusted
         self.years_label.setText('Years Projected: %s' % year)
         self.years_projected = year
         self.displaySavingsProjections()
@@ -550,11 +552,10 @@ class Example(QMainWindow):
             init_amount = self.all_balances[1][-1] #last known amount in account
             avg_yearly_savings = self.avgSavings * 12
 
-            #add x ticks, should start on current year, each x tick adds one to year label
+            #following code generates x ticks, starting on current year, increments of either one or two, depending on how many years are projected
             latest_year = max(map(lambda year: int(year), self.income_source_hash.keys()))
-            #projection data is a list of tuples where (x coordinate, x description), where x description is the year projected
-            projection_x_ticks = []
-            projection_savings = []
+            projection_x_ticks = [] #a list of tuples where (x coordinate, x description), where x description is the year projected
+            projection_savings = [] #the y value, projected saving amount
             year_interval = 1
             if self.years_projected > 45:
                 year_interval = 2
