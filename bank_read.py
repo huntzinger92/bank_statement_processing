@@ -338,8 +338,12 @@ class Example(QMainWindow):
             for source in self.income_source_hash[year]:
                 cursor.execute(income_source_insertion, (year, source, self.income_source_hash[year][source]))
             #insert gross salary table data
-            cursor.execute(gross_salary_insertion, (year, self.yearly_gross[count]))
-            count -= 1
+            cursor.execute(gross_salary_insertion, (year, self.yearly_gross[len(self.yearly_gross) - count]))
+            #if len(self.yearly_gross) == 1:
+                #cursor.execute(gross_salary_insertion, (year, self.yearly_gross[0]))
+            #else:
+                #cursor.execute(gross_salary_insertion, (year, self.yearly_gross[count]))
+            count += 1
 
         #insert all balances table data
         for transaction in self.all_balances:
