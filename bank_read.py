@@ -16,14 +16,16 @@ import sqlite3
 import datetime
 from statistics import mean
 
-class Example(QMainWindow):
+class App(QMainWindow):
 
     def __init__(self):
         super().__init__()
         #list of class variables to be used
         self.key = '' #defined by user input, from prompt after selecting the .csv file, used as primary key for all relevant data in db
+        self.choice = 'All Balances' #used to reload current graph on threshold changes (changed by handlePlotOptions) and initialize app after data import with a display of all balances graph
         self.threshold = '' #used to remove credits/debits LARGER than this amount
-        self.df = '' #holds dataframe of all bank transactions
+        self.df = '' #holds dataframe of all bank transactions, user can mutate
+        self.originalDf = '' #holds a permanent, immutable dataframe of all bank transactions
         self.month_hash = {} #each month is a "sub-hash", containing key/value pairs for total expenditures, income, and balance
         self.all_balances = [] #list of tuples containing integer representing date (unix epoch sec) and balance after every transaction
         self.months = [] #months as strings (used primarily for x-axis labels for graphing)
@@ -47,6 +49,7 @@ class Example(QMainWindow):
         self.bluePen = pg.mkPen(color=(57, 64, 255), width=2)
         self.layout_is_normal = False #used to check and see when normal layout needs to be restored
         self.has_savings_layout = False #used to check if savings layout is needed
+        self.sent_to_db = False #used to indicate whether or not data has been sent to database, if not, then self.send() is called by self.crunch()
         self.initUI()
 
     def initUI(self):
@@ -101,6 +104,18 @@ class Example(QMainWindow):
         self.plotOptionsBox.setLayout(plotOptionsLayout)
         self.plotOptionsBox.hide()
 
+        #income threshold slider (hidden before data import)
+        self.thresholdSlider = QSlider(Qt.Horizontal)
+        self.thresholdSlider.setSingleStep(500)
+        self.thresholdSlider.setMinimum(0)
+        self.thresholdSlider.setMaximum(20000)
+        self.thresholdSlider.valueChanged[int].connect(self.thresholdTracker)
+        self.thresholdSlider.sliderReleased.connect(self.thresholdDropper)
+        self.thresholdLabel = QLabel(self.thresholdSlider)
+        self.thresholdLabel.setText('Remove any transactions above this amount (set to $0 for none)')
+        self.thresholdLabel.setStyleSheet('font-size: 12px;')
+        self.thresholdSlider.hide()
+
         #currentPlot widget, each plotOptions choice rewrites self.currentPlot with relevant data
         self.currentPlot = pg.PlotWidget()
         self.currentPlot.showGrid(x=True, y=True)
@@ -120,9 +135,15 @@ class Example(QMainWindow):
             dropdownLayout.addWidget(self.userBox)
             dropdownLayout.addWidget(self.plotOptionsBox)
             self.dropdownRow.setLayout(dropdownLayout)
+            self.sliderRow = QGroupBox()
+            sliderLayout = QVBoxLayout()
+            sliderLayout.addWidget(self.thresholdLabel)
+            sliderLayout.addWidget(self.thresholdSlider)
+            self.sliderRow.setLayout(sliderLayout)
             self.container = QGroupBox()
             containerLayout = QVBoxLayout()
             containerLayout.addWidget(self.dropdownRow)
+            containerLayout.addWidget(self.sliderRow)
             containerLayout.addWidget(self.currentPlot)
             self.container.setLayout(containerLayout)
             self.setCentralWidget(self.container)
@@ -131,7 +152,10 @@ class Example(QMainWindow):
 
     def onPreviousData(self, text):
         #following code uses user-selected id to import all data necessary for graphing from database, then creates the necssary data for graphing from SQL queries
+        #still need to add import of entire bank statement history to store as originalDf
         self.plotOptionsBox.show()
+        self.thresholdSlider.show()
+        self.sent_to_db = True
 
         if text == '--Select--':
             return
@@ -139,14 +163,21 @@ class Example(QMainWindow):
         connection = sqlite3.connect('bank_statement_data.db')
         cursor = connection.cursor()
         temp_key = cursor.execute('''select id from users where id = ?''', (text,))
+        #create necessary variables for graphing
         self.key = temp_key.fetchone()
         self.setWindowTitle('Graph Your Bank Statement - %s' % self.key)
+        entire_statement = pd.read_sql_query('''select * from %s''' % self.key, connection)
+        self.originalDf = pd.DataFrame(entire_statement)
+        self.originalDf['Date'] = pd.to_datetime(self.originalDf.Date)
         self.all_balances = cursor.execute('''SELECT date, balance FROM %s_all_balances ORDER BY date DESC''' % self.key).fetchall()
         self.months = cursor.execute('''SELECT month FROM %s_monthly ORDER BY date(month)''' % self.key).fetchall()
         self.x_axis_monthly = range(0, len(self.months))
         self.balances = cursor.execute('''SELECT end_balance from %s_monthly ORDER BY date(month)''' % self.key).fetchall()
         self.incomes = cursor.execute('''SELECT income from %s_monthly ORDER BY date(month)''' % self.key).fetchall()
         self.expenditures = cursor.execute('''SELECT expenditures from %s_monthly ORDER BY date(month)''' % self.key).fetchall()
+
+        #set thresholdSlider maximum now that we have originalDf:
+        self.thresholdSliderMax()
 
         #extract value from returned tuple of sql queries (just need list of values, not list of tuples)
         for i in range(0, len(self.months)):
@@ -177,19 +208,21 @@ class Example(QMainWindow):
         #extra value from each in tuple from SQL query
         for i in range(0, len(self.yearly_gross)):
             self.yearly_gross[i] = self.yearly_gross[i][0]
-
         connection.close()
+        #call first graph
+        self.handlePlotOptions(self.choice)
 
     def getFilePath(self):
         #runs when user selects "Import New Statement" from menubar
         filename = QFileDialog.getOpenFileName(self, 'Open File', '/home', "CSV files (*.csv)")
         if filename != ('', ''):
             #filename[0] is path for bank statement csv
-            self.df = pd.read_csv(filename[0], header=3, sep=',', error_bad_lines=False)
-            self.df['Date'] = pd.to_datetime(self.df.Date)
-            self.df = self.df.fillna(0)
-            self.df['year_month'] = self.df['Date'].dt.strftime("%Y" + "-" + "%m")
-            self.df.sort_values(by=['Date'])
+            self.originalDf = pd.read_csv(filename[0], header=3, sep=',', error_bad_lines=False)
+            self.originalDf['Date'] = pd.to_datetime(self.originalDf.Date)
+            self.originalDf = self.originalDf.fillna(0)
+            self.originalDf['year_month'] = self.originalDf['Date'].dt.strftime("%Y" + "-" + "%m")
+            self.originalDf.sort_values(by=['Date'])
+            self.df = self.originalDf
             #ask for id and threshold input
             self.getPrompts()
 
@@ -204,22 +237,13 @@ class Example(QMainWindow):
             cursor.execute('''insert into users values(?)''', (self.key,))
             connection.commit()
             connection.close()
-        #user sets transaction threshold (all transactions with a value equal to or greater threshold will be removed from processing)
-        self.threshold, okPressed = QInputDialog.getInt(self, "Get integer","Would you like to remove all transactions above a certain dollar threshold? (enter -1 for none):", -1, -1, 1000000, 1)
-        if okPressed:
-            if self.threshold != -1:
-                rows_to_delete = []
-                for item in self.df.iterrows():
-                    if abs(item[1].get('Amount Debit')) >= self.threshold or abs(item[1].get('Amount Credit')) >= self.threshold:
-                        #item[0] is the index of the row to be dropped
-                        rows_to_delete.append(item[0])
-                self.df = self.df.drop([*rows_to_delete], axis=0)
-            self.crunchAndSend()
+            self.plotOptionsBox.show()
+            self.thresholdSlider.show()
+            self.thresholdSliderMax()
+            self.crunch()
 
-    def crunchAndSend(self):
-        #crunches data, creates id-specific tables in db, and sends data to respective tables
-        self.plotOptionsBox.show()
-
+    def crunch(self):
+        #crunches data, generates variables for graphing
         source_matcher = re.compile("(?<=Deposit ).*$") #matches all text from "Deposit " to end of line (name of entity depositing)
         atm_catcher = re.compile('^at ATM #[0-9]*$') #different atms have different number ids, this allows us to lump them all together as one source
 
@@ -288,7 +312,15 @@ class Example(QMainWindow):
         self.x_axis_monthly = range(0, len(self.months)) #used for creating plots of proper length
         self.month_x_ticks = [(self.x_axis_monthly[i], self.months[i]) for i in range(0, len(self.months))] #formatting for monthly x ticks on graph
 
-        #create tables and send data to them:
+        if not self.sent_to_db: #condition that matches on intial import
+            self.send()
+            self.sent_to_db = True
+        self.handlePlotOptions(self.choice)
+
+    def send(self):
+        #this function creates id-specific tables in sqlite, and sends data to respective tables
+
+        #create tables:
 
         createMonthTable = ('''CREATE TABLE IF NOT EXISTS "%s_monthly" (
 	"month"	TEXT UNIQUE,
@@ -321,7 +353,11 @@ class Example(QMainWindow):
 
         connection = sqlite3.connect('bank_statement_data.db')
         cursor = connection.cursor()
-        #create tables
+
+        #send entire dataframe:
+        self.originalDf.to_sql(self.key, connection)
+
+        #create tables in db
         cursor.execute(createMonthTable)
         cursor.execute(createIncomeSourceTable)
         cursor.execute(createGrossSalaryTable)
@@ -352,7 +388,54 @@ class Example(QMainWindow):
         connection.commit()
         connection.close()
 
+    def thresholdSliderMax(self):
+        max_credit = self.originalDf['Amount Credit'].max()
+        max_debit = self.originalDf['Amount Debit'].max()
+        max_transaction = max(max_credit, max_debit)
+        self.thresholdSlider.setMaximum(max_transaction + 1)
+        #self.thresholdSlider.setSingleStep((max_transaction + 1)//50)
+
+    def thresholdTracker(self, threshold):
+        self.threshold = threshold
+        #redo slider label
+        self.thresholdLabel.setText('Removed transactions above $%s (set to 0 to keep all)' % self.threshold)
+
+    def thresholdDropper(self):
+        #this function drops any rows with transactions above threshold, set by user
+        #set has_savings_layout to False so that variables update when df changes:
+        self.has_savings_layout = False
+        #reset all variables:
+        self.df = self.originalDf
+        self.month_hash = {} #each month is a "sub-hash", containing key/value pairs for total expenditures, income, and balance
+        self.all_balances = [] #list of tuples containing integer representing date (unix epoch sec) and balance after every transaction
+        self.months = [] #months as strings (used primarily for x-axis labels for graphing)
+        self.incomes = [] #float amounts for income by month
+        self.expenditures = [] #same for expenditures
+        self.balances = [] #same but for last balance of month
+        self.savings = [] #same but for savings
+        self.years_projected = 5 #used for the projected savings view, altered by self.changeYears
+        self.x_axis_monthly = [] #list of integers in range(0, len(self.months))
+        self.income_source_hash = {} #each key is a year with value of a "sub-hash" where each key is an income source and value is amount of income for that year
+        self.year_plot_hash = {} #each key is a year where its value is the relevant plotwidget, displaying a bar graph of sorted sources of income
+        self.yearly_gross = [] #list of gross income by year
+        self.balance_dates = [] #integer representations of date from every transaction (unix epoch)
+        self.month_x_ticks = [] #tuple of integer and respective month-year, used for labeling monthly x ticks
+        self.year_x_ticks = [] #tuples of integer and respective gross income by year (just year as string)
+
+        #drop rows with transactions above user set threshold, if threshold is not 0
+        if self.threshold != 0:
+            rows_to_delete = []
+            for item in self.df.iterrows():
+                if abs(item[1].get('Amount Debit')) >= self.threshold or abs(item[1].get('Amount Credit')) >= self.threshold:
+                    #item[0] is the index of the row to be dropped
+                    rows_to_delete.append(item[0])
+            self.df = self.df.drop([*rows_to_delete], axis=0)
+        self.crunch()
+
+
     def handlePlotOptions(self, choice):
+        #make choice a class variable so that it can be passed to thresholdDropper and graph can be reloaded on treshold changes
+        self.choice = choice
         if choice == 'All Balances':
             self.displayAllBalances()
         elif choice == 'Monthly Balances':
@@ -392,7 +475,7 @@ class Example(QMainWindow):
         all_balances_x_ticks = self.list_breakup([i[0] for i in self.all_balances])
         self.setNormalLayout()
         self.clearPlot()
-        self.currentPlot.plot([i[0] for i in self.all_balances], [i[1] for i in self.all_balances], pen=self.bluePen, symbol='o', symbolBrush=(57, 64, 255))
+        self.currentPlot.plot([i[0] for i in self.all_balances], [i[1] for i in self.all_balances], pen=self.bluePen, symbol='o', symbolSize='1', symbolBrush=(57, 64, 255))
         self.currentPlot.setTitle('Balance Remaining After Every Transaction')
         self.xAxis.setTicks([all_balances_x_ticks])
 
@@ -426,7 +509,7 @@ class Example(QMainWindow):
         x_left = list(map(lambda x: x -.25, self.x_axis_monthly))
         x_right = list(map(lambda x: x +.25, self.x_axis_monthly))
 
-        self.legend = self.currentPlot.addLegend(offset=(-1200,-572))
+        self.legend = self.currentPlot.addLegend()
         incomes_bar = pg.BarGraphItem(x=x_left, height=self.incomes, width=0.25, brush='g', name='Incomes')
         expenditures_bar = pg.BarGraphItem(x=self.x_axis_monthly, height=self.expenditures, width=0.25, brush='r', name='Expenditures')
         savings_bar = pg.BarGraphItem(x=x_right, height=self.savings, width=0.25, brush='b', name='Savings')
@@ -458,6 +541,7 @@ class Example(QMainWindow):
         self.newContainer = QGroupBox()
         newContainerLayout = QVBoxLayout()
         newContainerLayout.addWidget(self.dropdownRow)
+        newContainerLayout.addWidget(self.sliderRow)
         newContainerLayout.addWidget(self.yearOptionsBox)
         newContainerLayout.addWidget(self.currentPlot)
         self.newContainer.setLayout(newContainerLayout)
@@ -534,6 +618,7 @@ class Example(QMainWindow):
         newest_container = QGroupBox()
         layout = QVBoxLayout()
         layout.addWidget(self.dropdownRow)
+        layout.addWidget(self.sliderRow)
         layout.addWidget(savings_container)
         layout.addWidget(self.currentPlot)
         newest_container.setLayout(layout)
@@ -574,5 +659,5 @@ class Example(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    ex = Example()
+    ex = App()
     sys.exit(app.exec_())
