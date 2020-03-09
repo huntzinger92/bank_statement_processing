@@ -429,7 +429,7 @@ class App(QMainWindow):
                 if abs(item[1].get('Amount Debit')) >= self.threshold or abs(item[1].get('Amount Credit')) >= self.threshold:
                     #item[0] is the index of the row to be dropped
                     rows_to_delete.append(item[0])
-            self.df = self.df.drop([*rows_to_delete], axis=0)
+            self.df = self.df.drop(rows_to_delete, axis=0)
         self.crunch()
 
 
